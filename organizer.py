@@ -1,95 +1,54 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file
 import os
 import shutil
-from datetime import datetime
+from werkzeug.utils import secure_filename
+from zipfile import ZipFile
 
 app = Flask(__name__)
+
+UPLOAD_FOLDER = "uploads"
+ORGANIZED_FOLDER = "organized"
+
+# Create folders if not exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(ORGANIZED_FOLDER, exist_ok=True)
 
 @app.route("/")
 def home():
     return render_template("index.html")
 
-
 @app.route("/organize", methods=["POST"])
 def organize():
 
-    folder_path = request.form.get("folder_path").strip()
-    sort_option = request.form.get("sort_option")
+    # Clear old files
+    shutil.rmtree(UPLOAD_FOLDER)
+    shutil.rmtree(ORGANIZED_FOLDER)
+    os.makedirs(UPLOAD_FOLDER)
+    os.makedirs(ORGANIZED_FOLDER)
 
-    # Check if folder exists
-    if not os.path.isdir(folder_path):
-        return "❌ Invalid Folder Path! Please check and try again."
+    files = request.files.getlist("files")
 
-    # File type categories
-    image_ext = ["jpg", "jpeg", "png", "gif", "bmp"]
-    video_ext = ["mp4", "mkv", "avi", "mov"]
-    audio_ext = ["mp3", "wav", "aac"]
-    document_ext = ["pdf", "docx", "txt", "pptx", "xlsx"]
+    for file in files:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
 
-    for filename in os.listdir(folder_path):
+        ext = filename.split(".")[-1].lower()
 
-        file_path = os.path.join(folder_path, filename)
+        category_path = os.path.join(ORGANIZED_FOLDER, ext)
+        os.makedirs(category_path, exist_ok=True)
 
-        # Skip if it's already a folder
-        if not os.path.isfile(file_path):
-            continue
+        shutil.move(filepath, os.path.join(category_path, filename))
 
-        # Get file extension
-        if "." in filename:
-            file_ext = filename.split(".")[-1].lower()
-        else:
-            file_ext = ""
+    # Create ZIP
+    zip_path = "organized_files.zip"
+    with ZipFile(zip_path, "w") as zipf:
+        for root, dirs, files in os.walk(ORGANIZED_FOLDER):
+            for file in files:
+                full_path = os.path.join(root, file)
+                zipf.write(full_path)
 
-        # Get last modified date
-        timestamp = os.path.getmtime(file_path)
-        file_date = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+    return send_file(zip_path, as_attachment=True)
 
-        # SORTING LOGIC
-        if sort_option == "type":
-
-            if file_ext in image_ext:
-                folder_name = "Images"
-            elif file_ext in video_ext:
-                folder_name = "Videos"
-            elif file_ext in audio_ext:
-                folder_name = "Audio"
-            elif file_ext in document_ext:
-                folder_name = "Documents"
-            else:
-                folder_name = "Others"
-
-        elif sort_option == "date":
-            folder_name = file_date
-
-        elif sort_option == "both":
-
-            if file_ext in image_ext:
-                main_type = "Images"
-            elif file_ext in video_ext:
-                main_type = "Videos"
-            elif file_ext in audio_ext:
-                main_type = "Audio"
-            elif file_ext in document_ext:
-                main_type = "Documents"
-            else:
-                main_type = "Others"
-
-            folder_name = f"{main_type}_{file_date}"
-
-        else:
-            folder_name = "Others"
-
-        target_folder = os.path.join(folder_path, folder_name)
-
-        # Create folder if not exists
-        os.makedirs(target_folder, exist_ok=True)
-
-        # Move file
-        shutil.move(file_path, os.path.join(target_folder, filename))
-
-    return "✅ Files Organized Successfully!"
-
-
-# 🔹 Important for Online Deployment (Render)
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=True)
